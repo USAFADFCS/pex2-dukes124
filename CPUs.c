@@ -14,7 +14,8 @@
  *          All accesses to readyQ and finishedQ are protected by their
  *          respective mutex locks.
  * ===========================================================
- * Documentation Statement: <describe any help received>
+ * Documentation Statement: Used https://www.geeksforgeeks.org/operating-systems/round-robin-scheduling-in-operating-system/
+ * to help understand the round robin scheduling algorithm and how to implement it.
  * =========================================================== */
 
 #include <stdio.h>
@@ -196,10 +197,48 @@ void* RRcpu(void* param) {
     int threadNum = ((CpuParams*) param)->threadNumber;
     SharedVars* svars = ((CpuParams*) param)->svars;
 
-    // Process* p = NULL;  // TODO: uncomment when you implement this function
+    Process* p = NULL;
+    int quant = svars->quantum; // initialize to full
 
     while (1) {
         sem_wait(svars->cpuSems[threadNum]);
+
+        // if expired, requeue process before next one
+        if (p != NULL && quant <= 0) {
+            p->requeued = true;
+            pthread_mutex_lock(&(svars->readyQLock));
+            qInsert(&(svars->readyQ), p);
+            pthread_mutex_unlock(&(svars->readyQLock));
+            p = NULL;
+        }
+
+        if (p == NULL) {
+            pthread_mutex_lock(&(svars->readyQLock));
+
+            p = qRemove(&(svars->readyQ), 0);
+
+            if (p == NULL) {
+                printf("No process to schedule\n");
+            } else {
+                printf("Scheduling PID %d\n", p->PID);
+                quant = svars->quantum; // reset quant when new process
+            }
+
+            pthread_mutex_unlock(&(svars->readyQLock));
+        }
+
+        if (p != NULL) {
+            p->burstRemaining--;
+            quant--; // decrement quant after each unit of work
+
+            if (p->burstRemaining == 0) {
+                pthread_mutex_lock(&(svars->finishedQLock));
+                qInsert(&(svars->finishedQ), p);
+                pthread_mutex_unlock(&(svars->finishedQLock));
+
+                p = NULL;
+            }
+        }
 
         sem_post(svars->mainSem);
     }
